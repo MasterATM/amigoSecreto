@@ -17,9 +17,12 @@
 // execution with a planning phase).
 //
 // Usage:
-//   npx tsx .sandcastle/main.mts
+//   npx tsx .sandcastle/main.ts
 // Or add to package.json:
-//   "scripts": { "sandcastle": "npx tsx .sandcastle/main.mts" }
+//   "scripts": { "sandcastle": "npx tsx .sandcastle/main.ts" }
+import process from "node:process";
+import { resolve } from "node:path";
+import { config } from "dotenv";
 
 import * as sandcastle from "@ai-hero/sandcastle";
 import { podman } from "@ai-hero/sandcastle/sandboxes/podman";
@@ -31,11 +34,51 @@ import { podman } from "@ai-hero/sandcastle/sandboxes/podman";
 // Maximum number of implement→review cycles to run before stopping.
 // Each cycle works on one issue. Raise this to process more issues per run.
 const MAX_ITERATIONS = 10;
+const PROVIDER = "ollama";
+const QWEN_MODEL = "Qwen3.6-35B-A3B-8bit";
+
+config({ path: resolve(import.meta.dirname, ".env") });
+const PI_MODELS = JSON.stringify({
+  providers: {
+    ollama: {
+      baseUrl: process.env.OPENAI_BASE_URL,
+      api: "openai-completions",
+      apiKey: process.env.OPENAI_API_KEY,
+      models: [
+        { id: QWEN_MODEL }
+      ]
+    }
+  }
+});
+
+const PI_SETTINGS = JSON.stringify({
+  defaultProvider: PROVIDER,
+  defaultModel: QWEN_MODEL,
+  defaultThinkingLevel: "medium",
+  hideThinkingBlock: false,
+  compaction: {
+    enabled: true,
+    contextWindow: 100000,
+    reserveTokens: 40000,
+    keepRecentTokens: 20000
+  }
+});
+
+// Basically installing our settings.json and models into pi agent in docker image.
+const piHook = {
+  command: `mkdir -p /home/agent/.pi/agent && \
+    printf '%s' '${PI_MODELS}' > /home/agent/.pi/agent/models.json && \
+    printf '%s' '${PI_SETTINGS}' > /home/agent/.pi/agent/settings.json`,
+  sudo: false // ensure it runs as the agent user
+};
+
+const uid = process.getuid ? process.getuid() : 1000;
+const gid = process.getgid ? process.getgid() : 1000;
 
 // Hooks run inside the sandbox before the agent starts each iteration.
 // npm install ensures the sandbox always has fresh dependencies.
 const hooks = {
-  sandbox: { onSandboxReady: [{ command: "npm install" }] },
+  sandbox: { onSandboxReady: [piHook, { command: "npm install" }] },
 };
 
 // Copy node_modules from the host into the worktree before each sandbox
@@ -57,7 +100,10 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   // This gives both agents a real, named branch that persists across phases.
   const sandbox = await sandcastle.createSandbox({
     branch,
-    sandbox: podman(),
+    sandbox: podman({
+      containerUid: uid,
+      containerGid: gid,
+    }),
     hooks,
     copyToWorktree,
   });
@@ -79,7 +125,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     const implement = await sandbox.run({
       name: "implementer",
       maxIterations: 1,
-      agent: sandcastle.pi("claude-sonnet-4-6"),
+      agent: sandcastle.pi(`${PROVIDER}/${QWEN_MODEL}`),
       promptFile: "./.sandcastle/implement-prompt.md",
     });
 
@@ -103,7 +149,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     await sandbox.run({
       name: "reviewer",
       maxIterations: 1,
-      agent: sandcastle.pi("claude-sonnet-4-6"),
+      agent: sandcastle.pi(`${PROVIDER}/${QWEN_MODEL}`),
       promptFile: "./.sandcastle/review-prompt.md",
       promptArgs: {
         BRANCH: branch,

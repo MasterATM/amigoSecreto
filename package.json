@@ -1,16 +1,23 @@
 {
   "name": "amigosecreto",
+  "type": "module",
   "version": "1.0.0",
   "description": "",
   "license": "ISC",
   "author": "",
-  "type": "commonjs",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "sandcastle": "npx tsx .sandcastle/main.mts"
+    "build-image": "npx sandcastle podman build-image",
+    "build-imagefix": "podman build .sandcastle --tag localhost/sandcastle:amigosecreto --build-arg AGENT_UID=$(id -u) --build-arg AGENT_GID=$(id -g)",
+    "remove-image": "npx sandcastle podman build-image",
+    "sandcastle": "npx tsx .sandcastle/main.ts"
   },
   "dependencies": {
     "@ai-hero/sandcastle": "^0.10.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.0.0",
+    "dotenv": "^17.4.2"
   }
 }
