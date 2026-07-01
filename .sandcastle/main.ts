@@ -17,16 +17,20 @@
 // issues are picked up after each round of merges.
 //
 // Usage:
-//   npx tsx .sandcastle/main.ts
+//   npx tsx .sandcastle/main.mts
 // Or add to package.json:
-//   "scripts": { "sandcastle": "npx tsx .sandcastle/main.ts" }
+//   "scripts": { "sandcastle": "npx tsx .sandcastle/main.mts" }
 
 import * as sandcastle from "@ai-hero/sandcastle";
-import { podman } from "@ai-hero/sandcastle/sandboxes/podman";
 import { z } from "zod";
-import {config} from "dotenv";
-import {resolve} from "node:path";
-import process from "node:process";
+import {
+  createAgent,
+  createAgentWithHighThinkingLevel,
+  createSandbox,
+  copyToWorktree,
+  hooks,
+  MAX_ITERATIONS,
+} from "./config.js";
 
 // The planner emits its plan as JSON inside <plan> tags; Output.object extracts
 // and validates it against this schema. We use Zod here, but any Standard
@@ -37,65 +41,6 @@ const planSchema = z.object({
     z.object({ id: z.string(), title: z.string(), branch: z.string() }),
   ),
 });
-
-// ---------------------------------------------------------------------------
-// Configuration
-// ---------------------------------------------------------------------------
-
-// Maximum number of plan→execute→merge cycles before stopping.
-// Raise this if your backlog is large; lower it for a quick smoke-test run.
-const MAX_ITERATIONS = 10;
-const PROVIDER = "ollama";
-const QWEN_MODEL = "Qwen3.6-35B-A3B-8bit";
-
-config({ path: resolve(import.meta.dirname, ".env") });
-const PI_MODELS = JSON.stringify({
-  providers: {
-    ollama: {
-      baseUrl: process.env.OPENAI_BASE_URL,
-      api: "openai-completions",
-      apiKey: process.env.OPENAI_API_KEY,
-      models: [
-        { id: QWEN_MODEL }
-      ]
-    }
-  }
-});
-
-const PI_SETTINGS = JSON.stringify({
-  defaultProvider: PROVIDER,
-  defaultModel: QWEN_MODEL,
-  defaultThinkingLevel: "medium",
-  hideThinkingBlock: false,
-  compaction: {
-    enabled: true,
-    contextWindow: 100000,
-    reserveTokens: 40000,
-    keepRecentTokens: 20000
-  }
-});
-
-// Basically installing our settings.json and models into pi agent in docker image.
-const piHook = {
-  command: `mkdir -p /home/agent/.pi/agent && \
-    printf '%s' '${PI_MODELS}' > /home/agent/.pi/agent/models.json && \
-    printf '%s' '${PI_SETTINGS}' > /home/agent/.pi/agent/settings.json`,
-  sudo: false // ensure it runs as the agent user
-};
-
-const uid = process.getuid ? process.getuid() : 1000;
-const gid = process.getgid ? process.getgid() : 1000;
-
-// Hooks run inside the sandbox before the agent starts each iteration.
-// npm install ensures the sandbox always has fresh dependencies.
-const hooks = {
-  sandbox: { onSandboxReady: [piHook, { command: "npm install" }] },
-};
-
-// Copy node_modules from the host into the worktree before each sandbox
-// starts. Avoids a full npm install from scratch; the hook above handles
-// platform-specific binaries and any packages added since the last copy.
-const copyToWorktree = ["node_modules"];
 
 // ---------------------------------------------------------------------------
 // Main loop
@@ -114,17 +59,14 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   // It outputs a <plan> JSON block — Output.object parses and validates it.
   // -------------------------------------------------------------------------
   const plan = await sandcastle.run({
-    hooks,
-    sandbox: podman({
-      containerUid: uid,
-      containerGid: gid,
-    }),
+    hooks: hooks(),
+    sandbox: createSandbox(),
     name: "planner",
     // One iteration is enough: the planner just needs to read and reason,
     // not write code. (Structured output requires maxIterations: 1.)
     maxIterations: 1,
     // Opus for planning: dependency analysis benefits from deeper reasoning.
-    agent: sandcastle.pi(`${PROVIDER}/${QWEN_MODEL}`),
+    agent: createAgentWithHighThinkingLevel(),
     promptFile: "./.sandcastle/plan-prompt.md",
     // Extract and validate the <plan> JSON into a typed object. Throws
     // StructuredOutputError if the tag is missing, the JSON is malformed, or
@@ -161,11 +103,8 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     issues.map(async (issue) => {
       const sandbox = await sandcastle.createSandbox({
         branch: issue.branch,
-        sandbox: podman({
-          containerUid: uid,
-          containerGid: gid,
-        }),
-        hooks,
+        sandbox: createSandbox(),
+        hooks: hooks(),
         copyToWorktree,
       });
 
@@ -174,7 +113,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
         const implement = await sandbox.run({
           name: "implementer",
           maxIterations: 100,
-          agent: sandcastle.pi(`${PROVIDER}/${QWEN_MODEL}`),
+          agent: createAgent(),
           promptFile: "./.sandcastle/implement-prompt.md",
           promptArgs: {
             TASK_ID: issue.id,
@@ -188,7 +127,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
           const review = await sandbox.run({
             name: "reviewer",
             maxIterations: 1,
-            agent: sandcastle.pi(`${PROVIDER}/${QWEN_MODEL}`),
+            agent: createAgent(),
             promptFile: "./.sandcastle/review-prompt.md",
             promptArgs: {
               BRANCH: issue.branch,
@@ -255,14 +194,11 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   // uses to know which branches to merge and which issues to close.
   // -------------------------------------------------------------------------
   await sandcastle.run({
-    hooks,
-    sandbox: podman({
-      containerUid: uid,
-      containerGid: gid,
-    }),
+    hooks: hooks(),
+    sandbox: createSandbox(),
     name: "merger",
     maxIterations: 1,
-    agent: sandcastle.pi(`${PROVIDER}/${QWEN_MODEL}`),
+    agent: createAgent(),
     promptFile: "./.sandcastle/merge-prompt.md",
     promptArgs: {
       // A markdown list of branch names, one per line.
