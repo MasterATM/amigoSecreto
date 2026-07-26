@@ -1,0 +1,12 @@
+{
+  "lastChangelogVersion": "0.82.1",
+  "defaultProvider": "omlx",
+  "defaultModel": "Qwen3.6-35B-A3B-8bit",
+  "defaultThinkingLevel": "medium",
+  "enableInstallTelemetry": false,
+  "extensions": [],
+  "theme": "dark",
+  "packages": [
+    "npm:pi-search-hub"
+  ]
+}

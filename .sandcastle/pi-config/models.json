@@ -1,0 +1,14 @@
+{
+  "providers": {
+    "omlx": {
+      "baseUrl": "${OPENAI_BASE_URL}",
+      "api": "openai-completions",
+      "apiKey": "${OPENAI_API_KEY}",
+      "models": [
+        {
+          "id": "Qwen3.6-35B-A3B-8bit"
+        }
+      ]
+    }
+  }
+}

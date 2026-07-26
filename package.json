@@ -10,6 +10,7 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "build-image": "npx sandcastle podman build-image",
     "build-imagefix": "podman build .sandcastle --tag localhost/sandcastle:amigosecreto --build-arg AGENT_UID=$(id -u) --build-arg AGENT_GID=$(id -g)",
+    "run-image": "bash .sandcastle/run-image.sh",
     "remove-image": "npx sandcastle podman build-image",
     "sandcastle": "npx tsx .sandcastle/main.ts"
   },

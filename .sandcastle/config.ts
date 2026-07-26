@@ -1,4 +1,5 @@
 import { config } from "dotenv";
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import process from "node:process";
 import * as sandcastle from "@ai-hero/sandcastle";
@@ -8,40 +9,32 @@ import { podman } from "@ai-hero/sandcastle/sandboxes/podman";
 // Sandcastle configuration — all custom overrides live here
 // ---------------------------------------------------------------------------
 
-const PROVIDER = "ollama";
+const PROVIDER = "omlx";
 const MODEL = "Qwen3.6-35B-A3B-8bit";
 
 config({ path: resolve(import.meta.dirname, ".env") });
 
-const PI_MODELS = JSON.stringify({
-  providers: {
-    ollama: {
-      baseUrl: process.env.OPENAI_BASE_URL,
-      api: "openai-completions",
-      apiKey: process.env.OPENAI_API_KEY,
-      models: [{ id: MODEL }],
-    },
-  },
-});
+function readPiConfig(name: string): string {
+  return readFileSync(resolve(import.meta.dirname, `pi-config/${name}`), "utf-8");
+}
 
-const PI_SETTINGS = JSON.stringify({
-  defaultProvider: PROVIDER,
-  defaultModel: MODEL,
-  defaultThinkingLevel: "medium",
-  hideThinkingBlock: false,
-  compaction: {
-    enabled: true,
-    contextWindow: 100_000,
-    reserveTokens: 40_000,
-    keepRecentTokens: 20_000,
-  },
-});
+function substituteEnvVars(json: string): string {
+  return json.replace(/\$\{([^}]+)}/g, (_match, varName) => {
+    return process.env[varName] ?? _match;
+  });
+}
 
-// Install our settings.json and models into the pi agent inside the container.
+const PI_MODELS = substituteEnvVars(readPiConfig("models.json"));
+const PI_SETTINGS = readPiConfig("settings.json");
+const PI_SEARCH = readPiConfig("search.json");
+
+// Install our settings.json, models and search config into the pi agent inside the container.
 const piHook = {
   command: `mkdir -p /home/agent/.pi/agent && \
     printf '%s' '${PI_MODELS}' > /home/agent/.pi/agent/models.json && \
-    printf '%s' '${PI_SETTINGS}' > /home/agent/.pi/agent/settings.json`,
+    printf '%s' '${PI_SETTINGS}' > /home/agent/.pi/agent/settings.json && \
+    mkdir -p /home/agent/.pi/agent/extensions && \
+    printf '%s' '${PI_SEARCH}' > /home/agent/.pi/agent/extensions/search.json`,
   sudo: false,
 };
 

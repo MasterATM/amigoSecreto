@@ -1,0 +1,12 @@
+{
+  "defaultBackend": "auto",
+  "backends": {
+    "duckduckgo": {
+      "enabled": true
+    },
+    "searxng": {
+      "enabled": true,
+      "instanceUrl": "http://host.containers.internal:8080"
+    }
+  }
+}
